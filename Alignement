@@ -1,0 +1,5 @@
+module load minimap2/2.17
+module unload samtools
+module load samtools/1.7_deb10
+minimap2 -t 5 --MD --secondary=no -ax map-ont -p 1.0 -N 100 -k14 -uf ${INDEX} ${READ} | samtools view -bS /dev/stdin | samtools sort -@ 5 -m 2G -T /scratch/cdieterich/blub$$ -o ${BAM} /dev/stdin
+samtools index ${BAM}
