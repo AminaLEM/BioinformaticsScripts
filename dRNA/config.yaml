@@ -1,0 +1,52 @@
+#############################################GLOBAL PARAMSA #########################################################33
+# JACUSA PARAMS
+path_jar : "JACUSA_v2.0.0.jar"   # Path to the JAR file 
+
+# INPUT & OUTPUT PATH
+path_out: "data/Output/snakemake/18S"     # Path to the output directory, if it doesn't exist it will be created 
+path_inp: "data/alignments"           # Path to the directory containg the input BAM files
+mod_status_file: "data/all_rrna_mod_status.tsv"    # rRNA modification status file
+path_ref : "data/index.fasta" # Reference transcriptome 
+
+############################################### 3 WAYS ANALYSIS PARAMS#######################################################
+# INFOS PARAMS
+label: "WBSCR22"                 # Label of the analysis
+seq : 'NR_003286_RNA18SN5'     # Reference of reads
+target_ko: [1639]               # Target positions of the Knockout
+dtype : "MinION"             # Label of the data source MinION or Flongle
+
+# INPUTS PARAMS
+wt: "Parental_HCT116_Christiane_Zorbas_all_pass"                  # Name of the WT bam file without the extension .bam
+ko: "WBSCR22_Christiane_Zorbas_28S_18S_2zu1"                  # Name of the KO bam file without the extension .bam
+ivt: "18S_custom_adapter_v1"                # Name of the IVT bam file without the extension .bam
+
+# SAMTOOLS PARAMS
+seed: ['0', '42'] # Seed values to be used with either downasampling or mixing analyses
+
+# DOWNSAMPLING PARAMS
+coverage : ['300','500','1000','5000','10000']        # Amount of reads to be sampled
+
+# MULTIVARIATE ANALYSIS PARAMS
+LOF_contamination : 0.002       #  Contamination value for the Local Outlier Fcator method
+LOF_neighbors: 20               # Number of neighbors to use for the Local Outlier Fcator method
+
+
+# MIXING WT & KO ANALYSIS
+sampling_cov: '1000'                    # The number of reads to be considered for both WT and KO samples
+sampling_seed: '42'                    # The seed value to be coonsided for the downsampling of WT and KO samples 
+mixing_thre: ['0.002','0.005','0.05','0.1','0.25','0.5','0.75']      # Franction of WT to be considered
+
+############################################### BIVARAITE ANALYSIS PARAMS#######################################################
+
+# INPUTS WITH 2 REPLICATES
+ctr_rep1: 'rRNA_HTX1188'  # control sample replicate 1
+ctr_rep2: 'HTX1339_rRNA'  # control sample replicate 2
+cond1_rep1: 'DCM6069_rRNA'  # sample 1  replicate 1
+cond1_rep2: '18S_28S_DCM7956'  # sample 1  replicate 2
+cond2_rep1: 'HCM14798_rRNA'  # sample 2  replicate 1
+cond2_rep2: 'HCM10809_rRNA'   # sample 2  replicate 2
+
+# ANALYSIS PARAMS
+method: 'IQR'                          # IQR or LOF, if LOF, LOF_contamination_univariate and LOF_neighbors_univariate should be specified otherwise use ""
+LOF_neighbors_univariate:  ''              # Number of neighbors to consider for the Local Outlier Fcator method
+LOF_contamination_univariate : ''     #  Contamination value for the Local Outlier Fcator method
