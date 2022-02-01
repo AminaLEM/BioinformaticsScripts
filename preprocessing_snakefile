@@ -1,0 +1,40 @@
+configfile: "scripts/config.yaml"
+rule guppy_basecaller:
+    input:
+        fast5 = "data/demo/data/{sample}/fast5"
+    output:
+        "results/{sample}.gz"
+    params:
+        kit = config["kit_id"],
+        flow = config["flowcell_id"]
+    shell:
+        "guppy_basecaller -i {input.fast5} -s {output} "
+        "--flowcell {params.flow} --kit {params.kit} --cpu_threads_per_caller 14 --num_callers 1"
+        
+rule minimap:
+    input:
+        ref = "data/demo/demo.fa",
+        fastq = "data/demo/data/HEK293T-METTL3-KO-rep1/fastq/{sample}.fastq"
+    output:
+        bam = "results/{sample}.bam",       
+        log = "results/{sample}.log"
+    shell:
+        "minimap2 -a {input.ref} {input.fastq} | samtools view -Sb > {output.bam} 2> {output.log}" 
+
+rule sort:
+    input:
+        "results/{sample}.bam"
+    output:
+        bam = "results/{sample}.sorted.bam", 
+        log = "results/{sample}.sorted.log"
+    shell:
+        "samtools sort {input} > {output.bam}  2> {output.log}"
+
+rule index:
+    input:
+        "results/{sample}.bam"
+    output:
+        bai = "results/{sample}.bam.bai", 
+        log = "results/{sample}.indexed.log"
+    shell:
+        "samtools sort {input} > {output.bai}  2> {output.log}"
