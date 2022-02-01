@@ -1,0 +1,192 @@
+configfile: "config.yaml"
+
+out_analysis = "{path_out}/analysis/{dtype}/".format(**config)
+out_jacusa = "{path_out}/jacusa/{dtype}/".format(**config)
+out_bam = "{path_out}/bam/{dtype}/".format(**config)
+out = config['path_out']
+
+
+rule analysis_aggregate:
+    input:
+        directory(out_analysis+"{label}/with_{wt}".format(**config))
+
+rule downsampling_aggregate:
+    input:
+        directory(expand ( out_analysis+"{label}.sampled{{s1}}/DowS{{s2}}/with_{wt}".format(**config), s1=config['coverage'], s2=config['seed']  ))
+
+
+rule preprocessing: 
+    input:config['path_inp']+"/{sample}.bam"
+    output:
+        bam_f= temp(out_bam+"{sample}.filtered.bam"),
+        bam_c = out_bam+"{sample}.filtered.calmd.bam",
+        bai_c = out_bam+"{sample}.filtered.calmd.bam.bai"
+    params : config['path_ref']
+    shell:
+        """
+        samtools view -F 3328 -b {input} > {output.bam_f}
+        samtools calmd -b {output.bam_f} {params} > {output.bam_c}
+        samtools index {output.bam_c} > {output.bai_c}
+        """
+
+rule downsampling:
+    input:
+        bam = out_bam+"{sample}.filtered.calmd.bam"
+    output:
+        bam = out_bam+"{sample}.filtered.calmd.sampled{thre}/DowS{seed}.bam",
+        bai = out_bam+"{sample}.filtered.calmd.sampled{thre}/DowS{seed, }.bam.bai"
+    params: 
+        thre = "{thre}",
+        seq = config["id"],
+        seed = "{seed}"
+    shell:
+        """
+        function SubSample {{
+        FACTOR=$(
+            samtools view $1 \
+            | cut -f3 |grep -o $2 -c \
+            | awk -v COUNT=$3 -v seed=$6 '
+                BEGIN {{total=0}}
+                {{total += $1}}
+                END {{ printf "%f", seed+COUNT/total }}
+            ')
+        if [[ $FACTOR != $6.* ]]
+          then 
+            echo '[ERROR]: Requested number of reads exceeds total read count in' $1 '-- exiting' && exit 1
+        fi
+        samtools view -s $FACTOR -b $1 > $4
+        samtools index $4 > $5
+
+        }}
+
+        SubSample {input.bam} {params.seq} {params.thre} {output.bam} {output.bai} {params.seed}
+        """
+
+rule jacusa_call2: 
+    input:
+       bam1= out_bam+"{sample1}.filtered.calmd{type}{type2}.bam",
+       bam2= out_bam+"{sample2}.filtered.calmd{type}.bam",       
+    output: out_jacusa+"{label}{{type, .{{0}}|.sampled[0-9]+\/DowS[0-9]+}}{{type2, .{{0}}|\/MixS.+}}/{{sample1, [^\/]+}}vs{{sample2}}_call2.out".format(**config)
+    params: config["path_jar"]
+    shell:
+        """
+        java -Xmx20g -XX:ParallelGCThreads=10 -jar {params} call-2 -m 1 -q 1 -c 4 -p 10 \
+        -D -I -a D,Y -P1 FR-SECONDSTRAND -P2 FR-SECONDSTRAND -r {output} {input.bam1} {input.bam2}
+        """
+
+rule way_analysis:
+    input:
+        wt_ivt = out_jacusa+"{{s1}}/{{s2}}vs{ivt}_call2.out".format(**config) ,
+        ko_ivt = out_jacusa+"{{s1}}/{ko}vs{ivt}_call2.out".format(**config) ,
+        ko_wt = out_jacusa+"{{s1}}/{{s2}}vs{ko}_call2.out".format(**config) 
+    output: directory(out_analysis+"{s1}/with_{s2}")
+    params:
+        dtype =  config["dtype"],
+        target= config["target_ko"],
+        seq = config["id"],
+        lof_thre = config['LOF_contamination'],
+        lof_neigh = config['LOF_neighbors'],
+        label = config["label"],
+        mod_status_file = config['mod_status_file']        
+    notebook: "notebooks/3WayAnalysis.py.ipynb"
+    
+rule plot_lof:
+    output: directory( out_analysis+"{label}_lof_scores".format(**config))
+    params: 
+        target= config["target_ko"],
+        label = config["label"],
+        lof_thre = config['coverage'],
+        inp = config['path_out']+"/analysis/"+ config['dtype']+"/"+config["label"]
+    notebook: "notebooks/QuantitativeAnalysis.py.ipynb"
+
+
+rule IVTvsWT_analysis:
+    input : out_jacusa+"{label}/{wt}vs{ivt}_call2.out".format(**config),
+    output: directory( out_analysis+"{label}/{method}_{LOF_contamination_univariate}_{LOF_neighbors_univariate}".format(**config))
+    params: 
+        dtype =  config["dtype"],
+        method= config["method"],
+        seq = config["id"],
+        lof_thre = config['LOF_contamination_univariate'],
+        lof_neigh = config['LOF_neighbors_univariate'],
+        mod_status_file = config['mod_status_file']       , 
+        target = config['target_ko'] ,       
+        label = config['label']        
+        
+    notebook: "notebooks/IVTvsWT.py.ipynb"
+
+
+rule mixing_aggregate: 
+        input: directory(expand ( out_analysis+"{label}.sampled{sampling_cov}/DowS{sampling_seed}/with_MixS{{seed}}/{{s1}}_{wt}{ko}".format(**config), s1=config['mixing_thre'], seed=config['seed']  ))
+
+
+rule mixing:
+      input: bam1= out_bam+"{wt}.filtered.calmd.sampled{{sampling_param}}.bam".format(**config),
+             bam2= out_bam+"{ko}.filtered.calmd.sampled{{sampling_param}}.bam".format(**config)
+      output:
+             out1= temp(out_bam+"wt{{thre}}{label}{{seed}}{{sampling_param}}.bam".format(**config)),
+             out2= temp(out_bam+"ko{{thre}}{label}{{seed}}{{sampling_param}}.bam".format(**config)),
+             out3= out_bam+"{{thre}}_{wt}{ko}.filtered.calmd.sampled{{sampling_param}}/MixS{{seed}}.bam".format(**config),
+             out4= out_bam+"{{thre}}_{wt}{ko}.filtered.calmd.sampled{{sampling_param}}/MixS{{seed}}.bam.bai".format(**config)
+
+      params:
+          seed_val = lambda wc: float(wc.seed),
+          mixing_thre = lambda wc: float(wc.seed)+ float(wc.thre),
+          rest = lambda wc: float(wc.seed)+1- float(wc.thre)
+      shell: 
+          """
+          if [[ {params.mixing_thre} = 1 ]]
+          then 
+              cp {input.bam1} {output.out3}
+              cp {input.bam1}.bai {output.out4}
+
+              touch {output.out2}   
+              touch {output.out1}   
+              exit 0
+          fi
+          if [[ {params.mixing_thre} = 0 ]]
+          then 
+              cp {input.bam2} {output.out3}
+              cp {input.bam2}.bai {output.out4}
+
+              touch {output.out2}   
+              touch {output.out1}   
+              exit 0
+          fi
+              samtools view -s {params.mixing_thre} -b {input.bam1} > {output.out1}
+              samtools view -s {params.rest} -b {input.bam2} > {output.out2}
+              samtools merge {output.out3} {output.out1} {output.out2}
+              samtools index {output.out3} > {output.out4}
+
+          """
+
+rule bivariate_analysis:
+    input:
+        ctr_cond1 = out+"/jacusa/{ctr_rep1}+{ctr_rep2}vs{cond1_rep1}+{cond1_rep2}_call2.out".format(**config),
+        ctr_cond2 = out+"/jacusa/{ctr_rep1}+{ctr_rep2}vs{cond2_rep1}+{cond2_rep2}_call2.out".format(**config),
+    output: directory(out+"/analysis".format(**config))
+    log :         notebook="logs/notebooks/processed_notebook.ipynb"
+    params:
+        lof_thre = config['LOF_contamination_univariate'],
+        lof_neigh = config['LOF_neighbors_univariate'],
+        method= config["method"],        
+        mod_status_file = config['mod_status_file']
+    notebook: "notebooks/BivariateAnalysis.py.ipynb"
+    
+    
+    
+rule jacusa_call2_rep: 
+    input:
+       bam1_rep1= out_bam+"{{sample1}}.filtered.calmd.bam".format(**config),
+       bam1_rep2= out_bam+"{{sample2}}.filtered.calmd.bam".format(**config),       
+       bam2_rep1= out_bam+"{{sample3}}.filtered.calmd.bam".format(**config),  
+       bam2_rep2= out_bam+"{{sample4}}.filtered.calmd.bam".format(**config)       
+       
+    output: out+"/jacusa/{{sample1}}+{{sample2}}vs{{sample3}}+{{sample4}}_call2.out".format(**config)
+    params: config["path_jar"]
+    shell:
+        """
+        java -Xmx20g -XX:ParallelGCThreads=10 -jar {params} call-2 -m 1 -q 1 -c 4 -p 10 \
+        -D -I -a D,Y -P1 FR-SECONDSTRAND -P2 FR-SECONDSTRAND -r {output} {input.bam1_rep1},{input.bam1_rep2} {input.bam2_rep1},{input.bam2_rep2}
+        """
+    
